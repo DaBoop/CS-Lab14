@@ -5,11 +5,13 @@ using System.Runtime.Serialization;
 using System.Text;
 using System.Linq;
 using System.IO;
+//using System.Runtime.Serialization.Formatters.Soap;
+using System.Xml.Serialization;
 
 namespace Lab14
 {
    
-    static class CustomSerializer 
+    public static class CustomSerializer 
     {
         //static string commonFileName = "serialize.txt";
         static private void Trim(ref string s)
@@ -26,18 +28,17 @@ namespace Lab14
             
         }
 
-        static private object Parse(object obj, string[]propOrFieldData) // propOrFieldData[0] has to be Type of property or field, [1] - value, if indexed - [1],[2] - indexed values
+        static private object Parse(object obj, string[] propOrFieldData, Type elemType = null) // propOrFieldData[0] has to be Type of property or field, [1] - value, if indexed - [1],[2] - indexed values
         {
             Type objType = obj.GetType();
+            PropertyInfo propInfo = objType.GetProperty(propOrFieldData[0]);
+            FieldInfo fieldInfo = objType.GetField(propOrFieldData[0]);
             if (propOrFieldData.Length == 2)
-
             {
-
-                PropertyInfo propInfo = objType.GetProperty(propOrFieldData[0]);
-                FieldInfo fieldInfo = objType.GetField(propOrFieldData[0]);
-
+                
                 if (propInfo != null)
                 {
+                    if (propInfo.CanWrite == false) return obj;
                     var value = System.Convert.ChangeType(propOrFieldData[1], propInfo.PropertyType);
                     propInfo.SetValue(obj, value);
                 }
@@ -48,10 +49,45 @@ namespace Lab14
                 }
 
             }
+            else
+            {
+
+                if (obj is Array)
+                {
+                    var arr = Array.CreateInstance(elemType, propOrFieldData.Length - 1);
+                    for (int i = 1; i < propOrFieldData.Length ; i++)
+                    {
+
+                        if (propInfo != null) // Only prop? No such overload of setvalue for field
+                        {
+                            var value = System.Convert.ChangeType(propOrFieldData[i], elemType);
+                            if (propInfo.CanWrite == true)
+                                propInfo.SetValue(obj, value, new object[] { i });
+                            else
+                            {
+                                if (obj is Array && elemType != null)
+                                {
+                                    // var tempobj = System.Convert.ChangeType(obj, elemType.MakeArrayType()); // Што происходит
+                                    // tempobj.SetValue(value, i);
+                                    // return (object)tempobj;
+
+                                    arr.SetValue(value, i - 1);
+
+
+
+                                }
+                                else return obj;
+                                obj = (object)arr;
+                            }
+                        }
+                    }
+                }
+            }
             return obj;
         }
         
-        static private void DataToString(ref string s, object obj)
+        //TO DO: recursion for complex fields/properties
+        static private void DataToString(ref string s, object obj) 
         {
             var props = obj.GetType().GetProperties().ToArray();
             var fields = obj.GetType().GetFields().ToArray();
@@ -62,7 +98,18 @@ namespace Lab14
      
             foreach (PropertyInfo prop in props)
             {
-
+                Array arr;
+                arr = prop.GetValue(obj) as Array;
+                if (arr != null)
+                {
+                    s += "[" + prop.Name;
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        s += ":" + arr.GetValue(i);
+                    }
+                    s += "]";
+                    continue;
+                }
                 var parameters = prop.GetIndexParameters();
                 if (parameters.Length == 0)
                 {
@@ -70,9 +117,8 @@ namespace Lab14
                 }
                 else
                 {
-                    
+                   
                     s += "[" + prop.Name;
-
                     DataToString(ref s, prop.GetValue(obj,new object[]{ 0 }));
                     s += "]";
                 }
@@ -86,12 +132,18 @@ namespace Lab14
             //s += ">";
             File.WriteAllText(filename, s);
         }
-        static public object BinDeserialize(Type objType, string filename)
+        static public object BinDeserialize(Type objType, string filename, Type elemType = null)
         {
             object obj = null;
             try
             {
+                if (elemType == null)
                 obj = Activator.CreateInstance(objType);
+                else
+                {
+                    obj = Array.CreateInstance(elemType, 100); // Храни костыль
+                }
+                
             }
             catch (Exception) { return null; }
             if (obj == null) return null;
@@ -106,7 +158,7 @@ namespace Lab14
                 if (stringPropOrField == "")
                     continue;
                 string[] propOrFieldData = stringPropOrField.Split(":");
-                obj = Parse(obj, propOrFieldData);
+                obj = Parse(obj, propOrFieldData, elemType);
             }
             
             return obj;
@@ -116,6 +168,7 @@ namespace Lab14
         {
             static string fieldToJSON (FieldInfo info, object obj)
             {
+
                 if (info.FieldType == typeof(string))
                     return new string($"\"{info.Name}\":\"{info.GetValue(obj)}\"");
                 else
@@ -123,6 +176,24 @@ namespace Lab14
             }
             static string propToJSON(PropertyInfo info, object obj)
             {
+                Array arr;
+                arr = info.GetValue(obj) as Array;
+                if (arr != null)
+                {
+                    string s = "";
+                    s += $"\"{info.Name}\": [\n";
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        if (info.PropertyType == typeof(string))
+                            s += $"\"{arr.GetValue(i)},\"\n";
+                        else
+                            s += $"{arr.GetValue(i)},\n";
+                        //s +=  arr.GetValue(i);
+                    }
+                    s += "]";
+                    return s;
+                }
+                else
                 if (info.PropertyType == typeof(string))
                     return new string($"\"{info.Name}\":\"{info.GetValue(obj)}\"");
                 else
@@ -148,12 +219,18 @@ namespace Lab14
 
             File.WriteAllText(filename, s);
         }
-        static public object JSONDeserialize(Type objType, string filename)
+        static public object JSONDeserialize(Type objType, string filename, Type elemType = null)
         {
             object obj = null;
             try
             {
-                obj = Activator.CreateInstance(objType);
+                if (elemType == null)
+                    obj = Activator.CreateInstance(objType);
+                else
+                {
+                    obj = Array.CreateInstance(elemType, 100); // Храни костыль
+                }
+
             }
             catch (Exception) { return null; }
             if (obj == null) return null;
@@ -172,16 +249,55 @@ namespace Lab14
                     continue;
                 //propOrFieldData[0].Trim('\"'); Почему, шарп, почему ты не работаеш
                 //propOrFieldData[1].Trim('\"');
-                Trim(ref propOrFieldData[0]);
-                Trim(ref propOrFieldData[1]);
-               
+                char[] separators = new char[] { '[', ']', '\n' }; // Не работает с массивом, но у меня нет сыл это делать, то что ниже какой-то шок забейте - я в тильте
+                var propOrFieldDataArr = propOrFieldData[1].Split(separators, StringSplitOptions.RemoveEmptyEntries);
+                var list = new List<string>();
+                list.Add(propOrFieldData[0]);
+                var toParse = list.Concat(propOrFieldDataArr).ToArray();
+                for (int i = 0; i < toParse.Length; i++)
+                {
+                    Trim(ref toParse[i]);
+                }
 
-                
-                obj = Parse(obj, propOrFieldData);
+
+                obj = Parse(obj, toParse, elemType);
             }
 
             return obj;
         }
-    
+
+        /*static public void SOAPSerialize(object obj, string filename)
+        { 
+            // Притворитесь что тут что-то есть
+            SoapFormatter soapFormatter = new SoapFormatter();
+            using (Stream fStream = new FileStream(filename,
+            FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                soapFormatter.Serialize(fStream, objGraph);
+            }
+        }*/
+
+        static public void XMLSerialize(object obj, string filename)
+        { 
+            // Я не буду тратить СТОЛЬКО времени
+            XmlSerializer xSer = new XmlSerializer(obj.GetType());
+            using (FileStream fs = new FileStream(filename, FileMode.OpenOrCreate))
+            {
+                xSer.Serialize(fs, obj);
+            }
+        }
+        static public object XMLDeserialize(Type objectType, string filename)
+        {
+            XmlSerializer xSer = new XmlSerializer(objectType);
+            // Я не буду тратить СТОЛЬКО времени
+            object obj = null;
+            using (FileStream fs = new FileStream(filename, FileMode.OpenOrCreate))
+            {
+               obj = xSer.Deserialize(fs);
+            }
+            return obj;
+        }
+
+
     }
 }

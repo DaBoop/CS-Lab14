@@ -19,7 +19,7 @@ namespace Lab14
 
     }
         [Serializable]
-    abstract class Product : Goods
+    public abstract class Product : Goods
     {
         public int energyValue { get; set; }
 
@@ -36,7 +36,7 @@ namespace Lab14
 
     }
     [Serializable]
-    abstract class Confectionery : Product
+    public abstract class Confectionery : Product
     {
         public int sugarValue { get; set; }
 
@@ -49,7 +49,7 @@ namespace Lab14
         }
     }
     [Serializable]
-    sealed class Cake : Confectionery
+    public sealed class Cake : Confectionery
     {
         public int area { get; set; }
         public int height { get; set; }
